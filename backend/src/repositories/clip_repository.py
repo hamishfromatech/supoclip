@@ -107,3 +107,13 @@ class ClipRepository:
         deleted_count = result.rowcount
         logger.info(f"Deleted {deleted_count} clips for task {task_id}")
         return deleted_count
+
+    @staticmethod
+    async def delete_clip(db: AsyncSession, clip_id: str) -> None:
+        """Delete a single clip by ID."""
+        await db.execute(
+            text("DELETE FROM generated_clips WHERE id = :clip_id"),
+            {"clip_id": clip_id}
+        )
+        await db.commit()
+        logger.info(f"Deleted clip {clip_id}")

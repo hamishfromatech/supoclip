@@ -57,3 +57,15 @@ class SourceRepository:
             "metadata": getattr(row, 'metadata', None),
             "created_at": row.created_at
         }
+
+    @staticmethod
+    async def update_source_title(db: AsyncSession, source_id: str, title: str) -> None:
+        """Update the title of a source."""
+        from sqlalchemy import text
+
+        await db.execute(
+            text("UPDATE sources SET title = :title WHERE id = :source_id"),
+            {"title": title, "source_id": source_id}
+        )
+        await db.commit()
+        logger.info(f"Updated source {source_id} title to: {title}")

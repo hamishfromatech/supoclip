@@ -220,3 +220,96 @@ async def get_task_progress_sse(task_id: str, db: AsyncSession = Depends(get_db)
             await redis_client.close()
 
     return EventSourceResponse(event_generator())
+
+
+@router.patch("/{task_id}")
+async def update_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Update task details (title)."""
+    try:
+        data = await request.json()
+        title = data.get("title")
+
+        if not title:
+            raise HTTPException(status_code=400, detail="Title is required")
+
+        task_service = TaskService(db)
+
+        # Get task to verify it exists
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        # Update source title
+        await task_service.source_repo.update_source_title(db, task["source_id"], title)
+
+        return {"message": "Task updated successfully", "task_id": task_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating task: {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating task: {str(e)}")
+
+
+@router.delete("/{task_id}")
+async def delete_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Delete a task and all its associated clips."""
+    try:
+        headers = request.headers
+        user_id = headers.get("user_id")
+
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+
+        task_service = TaskService(db)
+
+        # Get task to verify ownership
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this task")
+
+        # Delete clips and task
+        await task_service.delete_task(task_id)
+
+        return {"message": "Task deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting task: {e}")
+        raise HTTPException(status_code=500, detail=f"Error deleting task: {str(e)}")
+
+
+@router.delete("/{task_id}/clips/{clip_id}")
+async def delete_clip(task_id: str, clip_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Delete a specific clip."""
+    try:
+        headers = request.headers
+        user_id = headers.get("user_id")
+
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+
+        task_service = TaskService(db)
+
+        # Verify task ownership
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this clip")
+
+        # Delete the clip
+        await task_service.clip_repo.delete_clip(db, clip_id)
+
+        return {"message": "Clip deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting clip: {e}")
+        raise HTTPException(status_code=500, detail=f"Error deleting clip: {str(e)}")

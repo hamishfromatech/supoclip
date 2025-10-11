@@ -176,3 +176,13 @@ class TaskService:
     async def get_user_tasks(self, user_id: str, limit: int = 50) -> list[Dict[str, Any]]:
         """Get all tasks for a user."""
         return await self.task_repo.get_user_tasks(self.db, user_id, limit)
+
+    async def delete_task(self, task_id: str) -> None:
+        """Delete a task and all its associated clips."""
+        # Delete all clips for this task
+        await self.clip_repo.delete_clips_by_task(self.db, task_id)
+
+        # Delete the task
+        await self.task_repo.delete_task(self.db, task_id)
+
+        logger.info(f"Deleted task {task_id} and all associated clips")

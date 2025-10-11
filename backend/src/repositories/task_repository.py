@@ -163,3 +163,13 @@ class TaskRepository:
             {"user_id": user_id}
         )
         return result.fetchone() is not None
+
+    @staticmethod
+    async def delete_task(db: AsyncSession, task_id: str) -> None:
+        """Delete a task by ID."""
+        await db.execute(
+            text("DELETE FROM tasks WHERE id = :task_id"),
+            {"task_id": task_id}
+        )
+        await db.commit()
+        logger.info(f"Deleted task {task_id}")

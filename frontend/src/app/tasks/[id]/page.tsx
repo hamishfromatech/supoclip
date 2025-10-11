@@ -7,8 +7,19 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useSession } from "@/lib/auth-client";
-import { ArrowLeft, Download, Clock, Star, AlertCircle } from "lucide-react";
+import { ArrowLeft, Download, Clock, Star, AlertCircle, Trash2, Edit2, X, Check } from "lucide-react";
 import Link from "next/link";
 import DynamicVideoPlayer from "@/components/dynamic-video-player";
 
@@ -54,6 +65,11 @@ export default function TaskPage() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedTitle, setEditedTitle] = useState("");
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deletingClipId, setDeletingClipId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchTaskStatus = async (retryCount = 0, maxRetries = 5) => {
     if (!params.id) return false;
@@ -65,7 +81,7 @@ export default function TaskPage() {
       // Don't wait for session - fetch immediately with user_id if available
       const headers: HeadersInit = {};
       if (session?.user?.id) {
-        headers['user_id'] = session.user.id;
+        headers["user_id"] = session.user.id;
       }
 
       const taskResponse = await fetch(`${apiUrl}/tasks/${params.id}`, {
@@ -90,7 +106,7 @@ export default function TaskPage() {
       if (taskData.status === "completed") {
         const clipsHeaders: HeadersInit = {};
         if (session?.user?.id) {
-          clipsHeaders['user_id'] = session.user.id;
+          clipsHeaders["user_id"] = session.user.id;
         }
 
         const clipsResponse = await fetch(`${apiUrl}/tasks/${params.id}/clips`, {
@@ -196,6 +212,83 @@ export default function TaskPage() {
     return "bg-red-100 text-red-800";
   };
 
+  const handleEditTitle = async () => {
+    if (!editedTitle.trim() || !session?.user?.id || !params.id) return;
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const response = await fetch(`${apiUrl}/tasks/${params.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          user_id: session.user.id,
+        },
+        body: JSON.stringify({ title: editedTitle }),
+      });
+
+      if (response.ok) {
+        setTask(task ? { ...task, source_title: editedTitle } : null);
+        setIsEditing(false);
+      } else {
+        alert("Failed to update title");
+      }
+    } catch (err) {
+      console.error("Error updating title:", err);
+      alert("Failed to update title");
+    }
+  };
+
+  const handleDeleteTask = async () => {
+    if (!session?.user?.id || !params.id) return;
+
+    setIsDeleting(true);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const response = await fetch(`${apiUrl}/tasks/${params.id}`, {
+        method: "DELETE",
+        headers: {
+          user_id: session.user.id,
+        },
+      });
+
+      if (response.ok) {
+        router.push("/list");
+      } else {
+        alert("Failed to delete task");
+      }
+    } catch (err) {
+      console.error("Error deleting task:", err);
+      alert("Failed to delete task");
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteDialog(false);
+    }
+  };
+
+  const handleDeleteClip = async (clipId: string) => {
+    if (!session?.user?.id || !params.id) return;
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const response = await fetch(`${apiUrl}/tasks/${params.id}/clips/${clipId}`, {
+        method: "DELETE",
+        headers: {
+          user_id: session.user.id,
+        },
+      });
+
+      if (response.ok) {
+        setClips(clips.filter((clip) => clip.id !== clipId));
+        setDeletingClipId(null);
+      } else {
+        alert("Failed to delete clip");
+      }
+    } catch (err) {
+      console.error("Error deleting clip:", err);
+      alert("Failed to delete clip");
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-white p-4">
@@ -254,21 +347,73 @@ export default function TaskPage() {
 
           {task && (
             <div>
-              <h1 className="text-2xl font-bold text-black mb-2">{task.source_title}</h1>
+              <div className="flex items-center gap-3 mb-2">
+                {isEditing ? (
+                  <div className="flex items-center gap-2 flex-1">
+                    <Input
+                      value={editedTitle}
+                      onChange={(e) => setEditedTitle(e.target.value)}
+                      className="text-2xl font-bold h-auto py-1"
+                      autoFocus
+                    />
+                    <Button size="sm" onClick={handleEditTitle} disabled={!editedTitle.trim()}>
+                      <Check className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setIsEditing(false);
+                        setEditedTitle(task.source_title);
+                      }}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <h1 className="text-2xl font-bold text-black">{task.source_title}</h1>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setIsEditing(true);
+                        setEditedTitle(task.source_title);
+                      }}
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                      onClick={() => setShowDeleteDialog(true)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </>
+                )}
+              </div>
               <div className="flex items-center gap-4 text-sm text-gray-600">
-                <Badge variant="outline" className="capitalize">{task.source_type}</Badge>
+                <Badge variant="outline" className="capitalize">
+                  {task.source_type}
+                </Badge>
                 <span className="flex items-center gap-1">
                   <Clock className="w-4 h-4" />
                   {new Date(task.created_at).toLocaleDateString()}
                 </span>
                 {task.status === "completed" ? (
-                  <span>{clips.length} {clips.length === 1 ? "clip" : "clips"} generated</span>
+                  <span>
+                    {clips.length} {clips.length === 1 ? "clip" : "clips"} generated
+                  </span>
                 ) : task.status === "processing" ? (
                   <Badge className="bg-blue-100 text-blue-800">Processing</Badge>
                 ) : task.status === "queued" ? (
                   <Badge className="bg-yellow-100 text-yellow-800">Queued</Badge>
                 ) : (
-                  <Badge variant="outline" className="capitalize">{task.status}</Badge>
+                  <Badge variant="outline" className="capitalize">
+                    {task.status}
+                  </Badge>
                 )}
               </div>
             </div>
@@ -288,8 +433,8 @@ export default function TaskPage() {
                 {!task
                   ? "Setting up your task. This should only take a moment..."
                   : task.status === "queued"
-                  ? "Your task is in the queue and will start processing shortly."
-                  : "Generating clips from your video. This usually takes 2-3 minutes."}
+                    ? "Your task is in the queue and will start processing shortly."
+                    : "Generating clips from your video. This usually takes 2-3 minutes."}
               </p>
             </div>
 
@@ -300,7 +445,8 @@ export default function TaskPage() {
                   <div className="flex items-center justify-center gap-3">
                     <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
                     <p className="text-sm font-medium text-black">
-                      {progressMessage || (!task ? "Initializing your task..." : "Processing video and generating clips...")}
+                      {progressMessage ||
+                        (!task ? "Initializing your task..." : "Processing video and generating clips...")}
                     </p>
                   </div>
 
@@ -391,7 +537,8 @@ export default function TaskPage() {
                     <h2 className="text-xl font-semibold">No Clips Generated</h2>
                   </div>
                   <p className="text-gray-600 mb-4">
-                    The task completed but no clips were generated. The video may not have had suitable content for clipping.
+                    The task completed but no clips were generated. The video may not have had suitable content for
+                    clipping.
                   </p>
                   <Link href="/">
                     <Button>
@@ -494,9 +641,18 @@ export default function TaskPage() {
                       <div className="flex gap-2">
                         <Button size="sm" variant="outline" asChild>
                           <a href={`http://localhost:8000${clip.video_url}`} download={clip.filename}>
-                            <Download className="w-4 h-4" />
+                            <Download className="w-4 h-4 mr-2" />
                             Download
                           </a>
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                          onClick={() => setDeletingClipId(clip.id)}
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Delete
                         </Button>
                       </div>
                     </div>
@@ -507,6 +663,46 @@ export default function TaskPage() {
           </div>
         )}
       </div>
+
+      {/* Delete Task Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Generation</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this generation? This will permanently delete all clips and cannot be
+              undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteTask} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
+              {isDeleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Clip Confirmation Dialog */}
+      <AlertDialog open={!!deletingClipId} onOpenChange={(open) => !open && setDeletingClipId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Clip</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this clip? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deletingClipId && handleDeleteClip(deletingClipId)}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
