@@ -121,7 +121,10 @@
       "Bash(docker-compose logs worker --tail=30)",
       "mcp__plugin_context7_context7__query-docs",
       "Bash(docker-compose logs backend --tail 15)",
-      "Bash(git add .)"
+      "Bash(git add .)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix caption display and timing issues\n\n- Fix captions stretching outside viewport by using method=''caption'' with size constraint\n- Use SubtitlesClip class for proper auto-changing text based on timing\n- Enable word_timestamps=True in Whisper transcription for accurate word-level timing\n- Ensure SubtitlesClip duration matches clip duration for proper audio-sync\n- Add debug logging to track word and segment timing for troubleshooting\n- Use relative positioning for consistent subtitle placement\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix caption display and sync issues with video processing\n\n- Use SubtitlesClip class for proper auto-changing text with timing\n- Change TextClip method from ''label'' to ''caption'' with size constraint to prevent text stretching outside viewport\n- Add max_text_width \\(90% of video width\\) and max_text_height \\(15% of video height\\) constraints\n- Use relative positioning \\(0.75\\) instead of pixel calculation for better consistency\n- Enable word_timestamps=True in Whisper transcription for more accurate word-level timing\n- Add clip_duration calculation and with_duration\\(\\) to ensure SubtitlesClip matches clip duration\n- Add debug logging for word/segment timing to help troubleshoot sync issues\n- Import SubtitlesClip at module level for consistency\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git add .claude/settings.local.json)"
     ]
   }
 }
