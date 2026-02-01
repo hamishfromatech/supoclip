@@ -1,0 +1,6 @@
+-- Add AI settings to users table
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(50) DEFAULT 'openai';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_model VARCHAR(100) DEFAULT 'gpt-4';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_api_key TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_base_url TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS whisper_model VARCHAR(20) DEFAULT 'medium';

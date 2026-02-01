@@ -20,6 +20,7 @@ from .config import Config
 from .database import init_db, close_db, get_db
 from .workers.job_queue import JobQueue
 from .api.routes import tasks
+from .api.routes import ai_settings
 
 # Configure logging
 logging.basicConfig(
@@ -38,24 +39,22 @@ config = Config()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown events."""
-    # Startup
     logger.info("🚀 Starting SupoClip API...")
-    try:
-        await init_db()
-        logger.info("✅ Database initialized")
-
-        # Initialize job queue
-        await JobQueue.get_pool()
-        logger.info("✅ Job queue initialized")
-
-        yield
-
-    finally:
-        # Shutdown
-        logger.info("🛑 Shutting down SupoClip API...")
-        await close_db()
-        await JobQueue.close_pool()
-        logger.info("✅ Cleanup complete")
+    
+    # Initialize database
+    await init_db()
+    logger.info("✅ Database initialized")
+    
+    # Initialize Job Queue
+    await JobQueue.initialize()
+    logger.info("✅ Job queue initialized")
+    
+    yield
+    
+    # Cleanup
+    await JobQueue.close()
+    await close_db()
+    logger.info("👋 Shutting down SupoClip API...")
 
 
 # Create FastAPI app
@@ -82,6 +81,7 @@ app.mount("/clips", StaticFiles(directory=str(clips_dir)), name="clips")
 
 # Include routers
 app.include_router(tasks.router)
+app.include_router(ai_settings.router)
 
 # Keep existing utility endpoints
 from .api.routes.media import router as media_router
@@ -121,8 +121,7 @@ async def check_database_health(db: AsyncSession = Depends(get_db)):
 async def check_redis_health():
     """Check Redis connectivity."""
     try:
-        pool = await JobQueue.get_pool()
-        await pool.ping()
+        await JobQueue.check_health()
         return {"status": "healthy", "redis": "connected"}
     except Exception as e:
         return {"status": "unhealthy", "redis": "disconnected", "error": str(e)}

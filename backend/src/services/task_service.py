@@ -2,6 +2,7 @@
 Task service - orchestrates task creation and processing workflow.
 """
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from typing import Dict, Any, Optional, Callable
 import logging
 
@@ -23,6 +24,33 @@ class TaskService:
         self.clip_repo = ClipRepository()
         self.video_service = VideoService()
 
+    async def _get_user_ai_settings(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get user's AI and caption settings from the database."""
+        try:
+            result = await self.db.execute(
+                text("""
+                    SELECT ai_provider, ai_model, ai_api_key, ai_base_url, default_caption_lines
+                    FROM users
+                    WHERE id = :user_id
+                """),
+                {"user_id": user_id}
+            )
+            row = result.fetchone()
+
+            if not row:
+                return None
+
+            return {
+                "provider": row.ai_provider or "local",
+                "model": row.ai_model or "llama3",
+                "api_key": row.ai_api_key,
+                "base_url": row.ai_base_url,
+                "caption_lines": getattr(row, 'default_caption_lines', 1)
+            }
+        except Exception as e:
+            logger.warning(f"Could not fetch AI settings for user {user_id}: {e}")
+            return None
+
     async def create_task_with_source(
         self,
         user_id: str,
@@ -30,7 +58,8 @@ class TaskService:
         title: Optional[str] = None,
         font_family: str = "TikTokSans-Regular",
         font_size: int = 24,
-        font_color: str = "#FFFFFF"
+        font_color: str = "#FFFFFF",
+        caption_lines: Optional[int] = None
     ) -> str:
         """
         Create a new task with associated source.
@@ -39,6 +68,11 @@ class TaskService:
         # Validate user exists
         if not await self.task_repo.user_exists(self.db, user_id):
             raise ValueError(f"User {user_id} not found")
+
+        # Get user's default caption lines if not specified
+        if caption_lines is None:
+            user_settings = await self._get_user_ai_settings(user_id)
+            caption_lines = user_settings.get("caption_lines", 1) if user_settings else 1
 
         # Determine source type
         source_type = self.video_service.determine_source_type(url)
@@ -66,7 +100,8 @@ class TaskService:
             status="queued",  # Changed from "processing" to "queued"
             font_family=font_family,
             font_size=font_size,
-            font_color=font_color
+            font_color=font_color,
+            caption_lines=caption_lines
         )
 
         logger.info(f"Created task {task_id} for user {user_id}")
@@ -89,6 +124,21 @@ class TaskService:
         try:
             logger.info(f"Starting processing for task {task_id}")
 
+            # Get user_id from task
+            task_data = await self.task_repo.get_task_by_id(self.db, task_id)
+            if not task_data:
+                raise ValueError(f"Task {task_id} not found")
+            user_id = task_data.get("user_id")
+
+            # Get user's AI settings
+            ai_settings = await self._get_user_ai_settings(user_id) if user_id else None
+            if ai_settings:
+                logger.info(f"Using AI settings for user {user_id}: provider={ai_settings['provider']}, model={ai_settings['model']}")
+
+            # Get caption_lines from task (default to 1 if not set)
+            caption_lines = task_data.get("caption_lines", 1)
+            logger.info(f"Using {caption_lines} caption lines for task {task_id}")
+
             # Update status to processing
             await self.task_repo.update_task_status(
                 self.db, task_id, "processing", progress=0, progress_message="Starting..."
@@ -109,7 +159,9 @@ class TaskService:
                 font_family=font_family,
                 font_size=font_size,
                 font_color=font_color,
-                progress_callback=update_progress
+                progress_callback=update_progress,
+                ai_settings=ai_settings,
+                caption_lines=caption_lines
             )
 
             # Save clips to database
@@ -127,7 +179,7 @@ class TaskService:
                     start_time=clip_info["start_time"],
                     end_time=clip_info["end_time"],
                     duration=clip_info["duration"],
-                    text=clip_info["text"],
+                    transcript_text=clip_info["text"],
                     relevance_score=clip_info["relevance_score"],
                     reasoning=clip_info["reasoning"],
                     clip_order=i + 1

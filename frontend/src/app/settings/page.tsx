@@ -12,18 +12,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import { useSession } from "@/lib/auth-client";
 import Link from "next/link";
-import { PlayCircle, Type, Palette, CheckCircle, AlertCircle, Settings } from "lucide-react";
+import { PlayCircle, Type, Palette, CheckCircle, AlertCircle, Settings, Cpu } from "lucide-react";
 
 interface UserPreferences {
   fontFamily: string;
   fontSize: number;
   fontColor: string;
+  captionLines: number;
 }
 
 export default function SettingsPage() {
   const [fontFamily, setFontFamily] = useState("TikTokSans-Regular");
   const [fontSize, setFontSize] = useState(24);
   const [fontColor, setFontColor] = useState("#FFFFFF");
+  const [captionLines, setCaptionLines] = useState(1);
   const [availableFonts, setAvailableFonts] = useState<Array<{ name: string, display_name: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
@@ -31,7 +33,7 @@ export default function SettingsPage() {
   const [success, setSuccess] = useState(false);
   const { data: session, isPending } = useSession();
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8004';
 
   // Load available fonts from backend and inject them into the page
   useEffect(() => {
@@ -85,9 +87,10 @@ export default function SettingsPage() {
         const response = await fetch('/api/preferences');
         if (response.ok) {
           const data: UserPreferences = await response.json();
-          setFontFamily(data.fontFamily);
-          setFontSize(data.fontSize);
-          setFontColor(data.fontColor);
+          setFontFamily(data.fontFamily || "TikTokSans-Regular");
+          setFontSize(data.fontSize || 24);
+          setFontColor(data.fontColor || "#FFFFFF");
+          setCaptionLines(data.captionLines || 1);
         }
       } catch (error) {
         console.error('Failed to load preferences:', error);
@@ -114,6 +117,7 @@ export default function SettingsPage() {
           fontFamily,
           fontSize,
           fontColor,
+          captionLines,
         }),
       });
 
@@ -178,6 +182,12 @@ export default function SettingsPage() {
             </Link>
 
             <div className="flex items-center gap-3">
+              <Link href="/ai-settings">
+                <Button variant="outline" size="sm">
+                  <Cpu className="w-4 h-4 mr-2" />
+                  AI Settings
+                </Button>
+              </Link>
               <Avatar className="w-8 h-8">
                 <AvatarImage src={session.user.image || ""} />
                 <AvatarFallback className="bg-gray-100 text-black text-sm">
@@ -306,9 +316,32 @@ export default function SettingsPage() {
                 </div>
               </div>
 
+              {/* Caption Lines Selector */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-black flex items-center gap-2">
+                  <Type className="w-4 h-4" />
+                  Caption Lines
+                </Label>
+                <Select value={captionLines.toString()} onValueChange={(value) => setCaptionLines(parseInt(value))} disabled={isLoading}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select caption lines" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1 Line</SelectItem>
+                    <SelectItem value="2">2 Lines</SelectItem>
+                    <SelectItem value="3">3 Lines</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">
+                  More lines allow longer subtitles to fit on mobile screens
+                </p>
+              </div>
+
               {/* Preview */}
               <div className="space-y-2">
-                <Label className="text-sm font-medium text-black">Preview</Label>
+                <Label className="text-sm font-medium text-black">
+                  Preview (max {captionLines === 1 ? '18' : captionLines === 2 ? '12' : '8'} chars/line)
+                </Label>
                 <div className="p-6 bg-black rounded-lg flex items-center justify-center min-h-[100px]">
                   <p
                     style={{
@@ -320,7 +353,11 @@ export default function SettingsPage() {
                     }}
                     className="font-medium"
                   >
-                    Your subtitle will look like this
+                    {captionLines === 1
+                      ? "Watch this amazing"
+                      : captionLines === 2
+                      ? "Watch this\namazing video"
+                      : "Watch\nthis\namazing"}
                   </p>
                 </div>
               </div>

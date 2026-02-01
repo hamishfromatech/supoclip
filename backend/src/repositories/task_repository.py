@@ -21,13 +21,14 @@ class TaskRepository:
         status: str = "processing",
         font_family: str = "TikTokSans-Regular",
         font_size: int = 24,
-        font_color: str = "#FFFFFF"
+        font_color: str = "#FFFFFF",
+        caption_lines: int = 1
     ) -> str:
         """Create a new task and return its ID."""
         result = await db.execute(
             text("""
-                INSERT INTO tasks (user_id, source_id, status, font_family, font_size, font_color, created_at, updated_at)
-                VALUES (:user_id, :source_id, :status, :font_family, :font_size, :font_color, NOW(), NOW())
+                INSERT INTO tasks (user_id, source_id, status, font_family, font_size, font_color, caption_lines, created_at, updated_at)
+                VALUES (:user_id, :source_id, :status, :font_family, :font_size, :font_color, :caption_lines, NOW(), NOW())
                 RETURNING id
             """),
             {
@@ -36,7 +37,8 @@ class TaskRepository:
                 "status": status,
                 "font_family": font_family,
                 "font_size": font_size,
-                "font_color": font_color
+                "font_color": font_color,
+                "caption_lines": caption_lines
             }
         )
         await db.commit()
@@ -74,6 +76,7 @@ class TaskRepository:
             "font_family": row.font_family,
             "font_size": row.font_size,
             "font_color": row.font_color,
+            "caption_lines": getattr(row, 'caption_lines', 1),
             "created_at": row.created_at,
             "updated_at": row.updated_at
         }
@@ -95,18 +98,17 @@ class TaskRepository:
         }
 
         # Build dynamic query based on what's provided
-        query_parts = ["UPDATE tasks SET status = :status"]
+        set_parts = ["status = :status"]
 
         if progress is not None:
-            query_parts.append("progress = :progress")
+            set_parts.append("progress = :progress")
 
         if progress_message is not None:
-            query_parts.append("progress_message = :progress_message")
+            set_parts.append("progress_message = :progress_message")
 
-        query_parts.append("updated_at = NOW()")
-        query_parts.append("WHERE id = :task_id")
+        set_parts.append("updated_at = NOW()")
 
-        query = ", ".join(query_parts)
+        query = f"UPDATE tasks SET {', '.join(set_parts)} WHERE id = :task_id"
 
         await db.execute(text(query), params)
         await db.commit()

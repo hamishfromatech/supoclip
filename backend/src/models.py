@@ -27,6 +27,12 @@ class User(Base):
     last_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
+    # Default font preferences
+    default_font_family: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, server_default=text("'TikTokSans-Regular'"))
+    default_font_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, server_default=text("'24'"))
+    default_font_color: Mapped[Optional[str]] = mapped_column(String(7), nullable=True, server_default=text("'#FFFFFF'"))
+    default_caption_lines: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, server_default=text("'1'"))  # 1, 2, or 3 lines
+
     # Relationships
     tasks: Mapped[List["Task"]] = relationship("Task", back_populates="user", cascade="all, delete-orphan")
 
@@ -39,10 +45,15 @@ class Task(Base):
     generated_clips_ids: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String(36)), nullable=True)
     status: Mapped[str] = mapped_column(String(20), server_default=text("'pending'"), nullable=False)
 
+    # Progress tracking fields
+    progress: Mapped[int] = mapped_column(Integer, nullable=True, server_default=text("'0'"))
+    progress_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Font customization fields
     font_family: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, server_default=text("'TikTokSans-Regular'"))
     font_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, server_default=text("'24'"))
     font_color: Mapped[Optional[str]] = mapped_column(String(7), nullable=True, server_default=text("'#FFFFFF'"))  # Hex color code
+    caption_lines: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, server_default=text("'1'"))  # 1, 2, or 3 lines
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

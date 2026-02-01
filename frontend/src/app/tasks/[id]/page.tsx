@@ -71,12 +71,12 @@ export default function TaskPage() {
   const [deletingClipId, setDeletingClipId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8004";
+
   const fetchTaskStatus = async (retryCount = 0, maxRetries = 5) => {
     if (!params.id) return false;
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
       // Fetch task details (including status)
       // Don't wait for session - fetch immediately with user_id if available
       const headers: HeadersInit = {};
@@ -152,7 +152,6 @@ export default function TaskPage() {
     // Only connect to SSE if task is queued or processing
     if (task.status !== "queued" && task.status !== "processing") return;
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     const eventSource = new EventSource(`${apiUrl}/tasks/${params.id}/progress`);
 
     console.log("📡 Connected to SSE for real-time progress");
@@ -216,7 +215,6 @@ export default function TaskPage() {
     if (!editedTitle.trim() || !session?.user?.id || !params.id) return;
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       const response = await fetch(`${apiUrl}/tasks/${params.id}`, {
         method: "PATCH",
         headers: {
@@ -243,7 +241,6 @@ export default function TaskPage() {
 
     setIsDeleting(true);
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       const response = await fetch(`${apiUrl}/tasks/${params.id}`, {
         method: "DELETE",
         headers: {
@@ -269,7 +266,6 @@ export default function TaskPage() {
     if (!session?.user?.id || !params.id) return;
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       const response = await fetch(`${apiUrl}/tasks/${params.id}/clips/${clipId}`, {
         method: "DELETE",
         headers: {
@@ -378,7 +374,7 @@ export default function TaskPage() {
                       variant="ghost"
                       onClick={() => {
                         setIsEditing(true);
-                        setEditedTitle(task.source_title);
+                        setEditedTitle(task.source_title || "");
                       }}
                     >
                       <Edit2 className="w-4 h-4" />
@@ -598,7 +594,7 @@ export default function TaskPage() {
                     {/* Video Player */}
                     <div className="bg-black relative flex-shrink-0 flex items-center justify-center">
                       <DynamicVideoPlayer
-                        src={`http://localhost:8000${clip.video_url}`}
+                        src={`${apiUrl}${clip.video_url}`}
                         poster="/placeholder-video.jpg"
                       />
                     </div>
@@ -640,7 +636,7 @@ export default function TaskPage() {
 
                       <div className="flex gap-2">
                         <Button size="sm" variant="outline" asChild>
-                          <a href={`http://localhost:8000${clip.video_url}`} download={clip.filename}>
+                          <a href={`${apiUrl}${clip.video_url}`} download={clip.filename}>
                             <Download className="w-4 h-4 mr-2" />
                             Download
                           </a>
@@ -688,15 +684,13 @@ export default function TaskPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Clip</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this clip? This action cannot be undone.
-            </AlertDialogDescription>
+            <AlertDialogDescription>Are you sure you want to delete this clip?</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => deletingClipId && handleDeleteClip(deletingClipId)}
               className="bg-red-600 hover:bg-red-700"
+              onClick={() => deletingClipId && handleDeleteClip(deletingClipId)}
             >
               Delete
             </AlertDialogAction>

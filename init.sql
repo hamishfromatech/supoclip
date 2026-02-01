@@ -7,6 +7,10 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Users table (compatible with Prisma schema)
 CREATE TABLE users (
     id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+=======
+-- Users table (compatible with Prisma schema)
+CREATE TABLE users (
+    id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     "emailVerified" BOOLEAN NOT NULL DEFAULT false,
@@ -19,13 +23,14 @@ CREATE TABLE users (
     -- Default font preferences
     default_font_family VARCHAR(100) DEFAULT 'TikTokSans-Regular',
     default_font_size INTEGER DEFAULT 24,
-    default_font_color VARCHAR(7) DEFAULT '#FFFFFF'
+    default_font_color VARCHAR(7) DEFAULT '#FFFFFF',
+    default_caption_lines INTEGER DEFAULT 1
 );
 
 -- Source table (created before tasks since tasks reference sources)
 CREATE TABLE sources (
-    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
-    type VARCHAR(20) CHECK (type IN ('youtube', 'video_url')) NOT NULL,
+    id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    type VARCHAR(20) CHECK (type IN ('youtube', 'video_url', 'upload')) NOT NULL,
     title VARCHAR(500) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -33,7 +38,7 @@ CREATE TABLE sources (
 
 -- Tasks table
 CREATE TABLE tasks (
-    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
     user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     source_id VARCHAR(36) REFERENCES sources(id) ON DELETE SET NULL,
     generated_clips_ids VARCHAR(36)[], -- Array of clip IDs
@@ -54,7 +59,7 @@ CREATE TABLE tasks (
 
 -- Generated clips table
 CREATE TABLE generated_clips (
-    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
     task_id VARCHAR(36) NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     filename VARCHAR(255) NOT NULL,
     file_path VARCHAR(500) NOT NULL,

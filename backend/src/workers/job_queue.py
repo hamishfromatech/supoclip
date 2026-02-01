@@ -24,6 +24,17 @@ class JobQueue:
     _pool: Optional[ArqRedis] = None
 
     @classmethod
+    async def initialize(cls):
+        """Initialize the job queue by creating the Redis pool."""
+        await cls.get_pool()
+        logger.info(f"Job queue initialized: {config.redis_host}:{config.redis_port}")
+
+    @classmethod
+    async def close(cls):
+        """Close the job queue connection."""
+        await cls.close_pool()
+
+    @classmethod
     async def get_pool(cls) -> ArqRedis:
         """Get or create the Redis connection pool."""
         if cls._pool is None:
@@ -74,3 +85,11 @@ class JobQueue:
         if job:
             return await job.status()
         return None
+
+    @classmethod
+    async def check_health(cls) -> dict:
+        """Check Redis connectivity."""
+        pool = await cls.get_pool()
+        # Test Redis connection with PING command
+        result = await pool.ping()
+        return {"status": "healthy" if result else "unhealthy"}

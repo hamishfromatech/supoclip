@@ -16,7 +16,8 @@ async def process_video_task(
     user_id: str,
     font_family: str = "TikTokSans-Regular",
     font_size: int = 24,
-    font_color: str = "#FFFFFF"
+    font_color: str = "#FFFFFF",
+    caption_lines: int = 1
 ) -> Dict[str, Any]:
     """
     Background worker task to process a video.
@@ -83,7 +84,6 @@ class WorkerSettings:
 
     # Functions to run
     functions = [process_video_task]
-    queue_name = "supoclip_tasks"
 
     # Redis settings from environment
     redis_settings = RedisSettings(
@@ -94,7 +94,7 @@ class WorkerSettings:
 
     # Retry settings
     max_tries = 3  # Retry failed jobs up to 3 times
-    job_timeout = 3600  # 1 hour timeout for video processing
+    job_timeout = 18000  # 5 hours timeout for video processing (for CPU Whisper)
 
     # Worker pool settings
     max_jobs = 4  # Process up to 4 jobs simultaneously

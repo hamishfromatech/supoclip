@@ -63,6 +63,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
     font_family = font_options.get("font_family", "TikTokSans-Regular")
     font_size = font_options.get("font_size", 24)
     font_color = font_options.get("font_color", "#FFFFFF")
+    caption_lines = font_options.get("caption_lines", 1)
 
     if not raw_source or not raw_source.get("url"):
         raise HTTPException(status_code=400, detail="Source URL is required")
@@ -80,7 +81,8 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
             title=raw_source.get("title"),
             font_family=font_family,
             font_size=font_size,
-            font_color=font_color
+            font_color=font_color,
+            caption_lines=caption_lines
         )
 
         # Get source type for worker
@@ -95,7 +97,8 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
             user_id,
             font_family,
             font_size,
-            font_color
+            font_color,
+            caption_lines
         )
 
         logger.info(f"Task {task_id} created and job {job_id} enqueued")

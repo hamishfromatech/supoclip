@@ -13,8 +13,9 @@ import json
 
 import cv2
 from moviepy import VideoFileClip, CompositeVideoClip, TextClip, ColorClip
+from moviepy.video.tools.subtitles import SubtitlesClip
 
-import assemblyai as aai
+import whisper
 import srt
 from datetime import timedelta
 
@@ -58,33 +59,38 @@ class VideoProcessor:
         return settings.get(target_quality, settings["high"])
 
 def get_video_transcript(video_path: Path) -> str:
-    """Get transcript using AssemblyAI with word-level timing for precise subtitles."""
+    """Get transcript using local Whisper with segment-level timing for subtitles."""
     logger.info(f"Getting transcript for: {video_path}")
 
-    # Configure AssemblyAI
-    aai.settings.api_key = config.assembly_ai_api_key
-    transcriber = aai.Transcriber()
-
-    # Request word-level timestamps for precise subtitle sync
-    config_obj = aai.TranscriptionConfig(
-        speaker_labels=False,
-        punctuate=True,
-        format_text=True,
-        speech_model=aai.SpeechModel.best
-    )
-
     try:
-        logger.info("Starting AssemblyAI transcription")
-        transcript = transcriber.transcribe(str(video_path), config=config_obj)
+        logger.info(f"Loading local Whisper model: {config.whisper_model}")
+        # Use available device (GPU if available, otherwise CPU)
+        model = whisper.load_model(config.whisper_model)
 
-        if transcript.status == aai.TranscriptStatus.error:
-            logger.error(f"AssemblyAI transcription failed: {transcript.error}")
-            raise Exception(f"Transcription failed: {transcript.error}")
-
+        logger.info("Starting local Whisper transcription with word-level timestamps")
+        # Use word_timestamps=True for precise word-level timing for better subtitle sync
+        result = model.transcribe(str(video_path), word_timestamps=True)
+        
         # Format transcript with timestamps for AI analysis
         formatted_lines = []
-        if transcript.words:
-            logger.info(f"Processing {len(transcript.words)} words with precise timing")
+        
+        # Whisper returns segments which contain words if word_timestamps=True
+        all_words = []
+        for segment in result.get("segments", []):
+            if "words" in segment:
+                for word in segment["words"]:
+                    all_words.append(word)
+            else:
+                # Fallback if words are not present for some reason
+                # Create a pseudo-word from the segment
+                all_words.append({
+                    "word": segment["text"],
+                    "start": segment["start"],
+                    "end": segment["end"]
+                })
+
+        if all_words:
+            logger.info(f"Processing {len(all_words)} words with precise timing")
 
             # Group words into logical segments for readability
             current_segment = []
@@ -92,20 +98,24 @@ def get_video_transcript(video_path: Path) -> str:
             segment_word_count = 0
             max_words_per_segment = 8  # ~3-4 seconds of speech
 
-            for word in transcript.words:
+            for word in all_words:
+                start_ms = int(word["start"] * 1000)
+                end_ms = int(word["end"] * 1000)
+                
                 if current_start is None:
-                    current_start = word.start
+                    current_start = start_ms
 
-                current_segment.append(word.text)
+                word_text = word["word"].strip()
+                current_segment.append(word_text)
                 segment_word_count += 1
 
                 # End segment at natural breaks or word limit
                 if (segment_word_count >= max_words_per_segment or
-                    word.text.endswith('.') or word.text.endswith('!') or word.text.endswith('?')):
+                    word_text.endswith('.') or word_text.endswith('!') or word_text.endswith('?')):
 
                     if current_segment:
                         start_time = format_ms_to_timestamp(current_start)
-                        end_time = format_ms_to_timestamp(word.end)
+                        end_time = format_ms_to_timestamp(end_ms)
                         text = ' '.join(current_segment)
                         formatted_lines.append(f"[{start_time} - {end_time}] {text}")
 
@@ -116,16 +126,24 @@ def get_video_transcript(video_path: Path) -> str:
             # Handle any remaining words
             if current_segment and current_start is not None:
                 start_time = format_ms_to_timestamp(current_start)
-                end_time = format_ms_to_timestamp(transcript.words[-1].end)
+                end_time = format_ms_to_timestamp(int(all_words[-1]["end"] * 1000))
                 text = ' '.join(current_segment)
                 formatted_lines.append(f"[{start_time} - {end_time}] {text}")
 
         # Cache the raw transcript for subtitle generation
-        cache_transcript_data(video_path, transcript)
+        # Pass a simple namespace object to cache_transcript_data
+        from types import SimpleNamespace
+        
+        legacy_transcript = SimpleNamespace(
+            words=[SimpleNamespace(text=w["word"].strip(), start=int(w["start"]*1000), end=int(w["end"]*1000)) for w in all_words],
+            text=result.get("text", "")
+        )
 
-        result = '\n'.join(formatted_lines)
-        logger.info(f"Transcript formatted: {len(formatted_lines)} segments, {len(result)} chars")
-        return result
+        cache_transcript_data(video_path, legacy_transcript)
+
+        final_result = '\n'.join(formatted_lines)
+        logger.info(f"Transcript formatted: {len(formatted_lines)} segments, {len(final_result)} chars")
+        return final_result
 
     except Exception as e:
         logger.error(f"Error in transcription: {e}")
@@ -472,13 +490,25 @@ def parse_timestamp_to_seconds(timestamp_str: str) -> float:
         logger.error(f"Failed to parse timestamp '{timestamp_str}': {e}")
         return 0.0
 
-def create_assemblyai_subtitles(video_path: Path, clip_start: float, clip_end: float, video_width: int, video_height: int, font_family: str = "THEBOLDFONT-FREEVERSION", font_size: int = 24, font_color: str = "#FFFFFF") -> List[TextClip]:
-    """Create subtitles using AssemblyAI's precise word timing."""
+def create_assemblyai_subtitles(video_path: Path, clip_start: float, clip_end: float, video_width: int, video_height: int, font_family: str = "THEBOLDFONT-FREEVERSION", font_size: int = 24, font_color: str = "#FFFFFF", caption_lines: int = 1) -> List[TextClip]:
+    """Create subtitles using AssemblyAI's precise word timing.
+
+    Uses SubtitlesClip for proper auto-changing text with timing.
+    Uses 'caption' method with size constraint to prevent text from stretching outside viewport.
+
+    Args:
+        caption_lines: Number of lines for captions (1, 2, or 3)
+    """
+
     transcript_data = load_cached_transcript_data(video_path)
 
     if not transcript_data or not transcript_data.get('words'):
         logger.warning("No cached transcript data available for subtitles")
         return []
+
+    # Calculate clip duration for proper sync
+    clip_duration = clip_end - clip_start
+    logger.info(f"Creating subtitles for clip: {clip_start:.2f}s - {clip_end:.2f}s (duration: {clip_duration:.2f}s)")
 
     # Convert clip timing to milliseconds
     clip_start_ms = int(clip_start * 1000)
@@ -492,7 +522,7 @@ def create_assemblyai_subtitles(video_path: Path, clip_start: float, clip_end: f
 
         # Check if word overlaps with clip
         if word_start < clip_end_ms and word_end > clip_start_ms:
-            # Adjust timing relative to clip start
+            # Adjust timing relative to clip start (clip starts at time 0)
             relative_start = max(0, (word_start - clip_start_ms) / 1000.0)
             relative_end = min((clip_end_ms - clip_start_ms) / 1000.0, (word_end - clip_start_ms) / 1000.0)
 
@@ -508,15 +538,30 @@ def create_assemblyai_subtitles(video_path: Path, clip_start: float, clip_end: f
         logger.warning("No words found in clip timerange")
         return []
 
-    # Group words into subtitle segments (3-4 words per subtitle for readability)
-    subtitle_clips = []
+    logger.info(f"Found {len(relevant_words)} relevant words for subtitles")
+    # Log first few words for debugging
+    for i, word in enumerate(relevant_words[:5]):
+        logger.info(f"  Word {i+1}: '{word['text']}' at {word['start']:.3f}s - {word['end']:.3f}s")
+
     processor = VideoProcessor(font_family, font_size, font_color)
 
-    # Use custom font size or calculate based on video width
+    # Calculate font size and constraints for 9:16 vertical video
     calculated_font_size = max(20, min(40, int(font_size * (video_width / 720))))
     final_font_size = calculated_font_size
 
-    words_per_subtitle = 3
+    # Calculate max characters per line based on caption_lines
+    # More lines = fewer characters per line for better readability
+    # Reduced values for vertical 9:16 video format
+    if caption_lines == 1:
+        words_per_subtitle = 3
+    elif caption_lines == 2:
+        words_per_subtitle = 5
+    else:  # 3 lines
+        words_per_subtitle = 6
+
+    # Build subtitle list for SubtitlesClip: [(start, end), text]
+    subtitles_list = []
+
     for i in range(0, len(relevant_words), words_per_subtitle):
         word_group = relevant_words[i:i + words_per_subtitle]
 
@@ -531,38 +576,105 @@ def create_assemblyai_subtitles(video_path: Path, clip_start: float, clip_end: f
         if segment_duration < 0.1:  # Skip very short segments
             continue
 
-        # Create text
-        text = ' '.join(word['text'] for word in word_group)
+        # Create text - SubtitlesClip will handle word-level display
+        full_text = ' '.join(word['text'] for word in word_group)
+        subtitles_list.append(((segment_start, segment_end), full_text))
 
-        try:
-            # Create high-quality text clip with custom font settings
-            text_clip = TextClip(
-                text=text,
-                font=processor.font_path,
-                font_size=final_font_size,
-                color=font_color,
-                stroke_color='black',
-                stroke_width=1,
-                method='label',
-                text_align='center'
-            ).with_duration(segment_duration).with_start(segment_start)
+    if not subtitles_list:
+        logger.warning("No subtitle segments created")
+        return []
 
-            # Position in lower middle (not full bottom, not center)
-            text_height = text_clip.size[1] if text_clip.size else 40
-            # Place at about 75% of the way down the video (lower middle)
-            vertical_position = int(video_height * 0.75 - text_height // 2)
-            text_clip = text_clip.with_position(('center', vertical_position))
+    logger.info(f"Created {len(subtitles_list)} subtitle segments")
+    # Log first few segments for debugging
+    for i, ((start, end), text) in enumerate(subtitles_list[:3]):
+        logger.info(f"  Segment {i+1}: '{text}' at {start:.3f}s - {end:.3f}s")
 
-            subtitle_clips.extend([text_clip])
+    # Calculate max text width with margin (90% of video width)
+    max_text_width = int(video_width * 0.9)
+    max_text_height = int(video_height * 0.15)  # Allow up to 15% of video height for captions
 
-        except Exception as e:
-            logger.warning(f"Failed to create subtitle for '{text}': {e}")
-            continue
+    # Create subtitle generator function that uses caption method with size constraint
+    # This ensures text wraps within viewport and doesn't stretch outside
+    def make_subtitle_textclip(text: str) -> TextClip:
+        # Use caption method with size constraint to auto-wrap text
+        # This prevents text from stretching outside viewport
+        text_clip = TextClip(
+            text=text,
+            font=processor.font_path,
+            font_size=final_font_size,
+            color=font_color,
+            stroke_color='black',
+            stroke_width=1,
+            method='caption',  # caption method handles text wrapping
+            size=(max_text_width, max_text_height),  # Constrain width and height
+            text_align='center'
+        )
+        # Ensure the clip is exactly the specified size
+        return text_clip.resized(width=max_text_width, height=max_text_height)
 
-    logger.info(f"Created {len(subtitle_clips)} subtitle elements from AssemblyAI data")
-    return subtitle_clips
+    # Create SubtitlesClip - this handles auto-changing text based on timing
+    try:
+        subtitles_clip = SubtitlesClip(
+            subtitles_list,
+            make_textclip=make_subtitle_textclip
+        )
+        # Ensure the SubtitlesClip duration matches the clip duration for proper sync
+        subtitles_clip = subtitles_clip.with_duration(clip_duration)
+        # Position at 75% down the video (using relative positioning)
+        subtitles_clip = subtitles_clip.with_position(("center", 0.75), relative=True)
 
-def create_optimized_clip(video_path: Path, start_time: float, end_time: float, output_path: Path, add_subtitles: bool = True, font_family: str = "THEBOLDFONT-FREEVERSION", font_size: int = 24, font_color: str = "#FFFFFF") -> bool:
+        logger.info(f"Created SubtitlesClip with {len(subtitles_list)} segments ({caption_lines} lines), duration: {clip_duration:.2f}s")
+        return [subtitles_clip]
+
+    except Exception as e:
+        logger.error(f"Failed to create SubtitlesClip: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        # Fallback to manual TextClip creation if SubtitlesClip fails
+        return []
+
+
+def wrap_text(text: str, max_chars: int, max_lines: int) -> List[str]:
+    """Wrap text into multiple lines, respecting word boundaries."""
+    words = text.split()
+    if not words:
+        return [text]
+
+    lines = []
+    current_line = []
+    current_length = 0
+
+    for word in words:
+        word_length = len(word)
+
+        # Check if adding this word would exceed the line limit
+        if current_line and current_length + 1 + word_length > max_chars:
+            lines.append(' '.join(current_line))
+            current_line = [word]
+            current_length = word_length
+        else:
+            current_line.append(word)
+            current_length += word_length + (1 if current_line else 0)
+
+        # Check if we've reached the maximum number of lines
+        if len(lines) >= max_lines - 1 and current_line:
+            break
+
+    if current_line:
+        lines.append(' '.join(current_line))
+
+    # If we have more words, add the remaining on the last line (truncate if needed)
+    remaining_words = words[len(' '.join(lines)):]
+    if remaining_words:
+        remaining_text = ' '.join(remaining_words[:10])  # Limit to avoid overflow
+        if lines:
+            lines[-1] += ' ' + remaining_text
+        else:
+            lines.append(remaining_text)
+
+    return lines
+
+def create_optimized_clip(video_path: Path, start_time: float, end_time: float, output_path: Path, add_subtitles: bool = True, font_family: str = "THEBOLDFONT-FREEVERSION", font_size: int = 24, font_color: str = "#FFFFFF", caption_lines: int = 1) -> bool:
     """Create optimized 9:16 clip with AssemblyAI subtitles."""
     try:
         duration = end_time - start_time
@@ -598,7 +710,7 @@ def create_optimized_clip(video_path: Path, start_time: float, end_time: float, 
 
         if add_subtitles:
             subtitle_clips = create_assemblyai_subtitles(
-                video_path, start_time, end_time, new_width, new_height, font_family, font_size, font_color
+                Path(video_path), start_time, end_time, new_width, new_height, font_family, font_size, font_color, caption_lines
             )
             final_clips.extend(subtitle_clips)
 
@@ -625,23 +737,64 @@ def create_optimized_clip(video_path: Path, start_time: float, end_time: float, 
         return True
 
     except Exception as e:
+        import traceback
         logger.error(f"Failed to create clip: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return False
 
-def create_clips_from_segments(video_path: Path, segments: List[Dict[str, Any]], output_dir: Path, font_family: str = "THEBOLDFONT-FREEVERSION", font_size: int = 24, font_color: str = "#FFFFFF") -> List[Dict[str, Any]]:
+def create_clips_from_segments(video_path: Path, segments: List[Dict[str, Any]], output_dir: Path, font_family: str = "THEBOLDFONT-FREEVERSION", font_size: int = 24, font_color: str = "#FFFFFF", caption_lines: int = 1) -> List[Dict[str, Any]]:
     """Create optimized video clips from segments."""
     logger.info(f"Creating {len(segments)} clips")
+
+    # Log first segment structure for debugging
+    if segments:
+        logger.info(f"First segment structure: {segments[0]}")
+        for key, value in segments[0].items():
+            logger.info(f"  {key}: {value} (type: {type(value)})")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     clips_info = []
 
     for i, segment in enumerate(segments):
         try:
-            # Debug log the segment data
-            logger.info(f"Processing segment {i+1}: start='{segment.get('start_time')}', end='{segment.get('end_time')}'")
+            # Normalize segment data - convert any lists to strings
+            normalized_segment = {}
+            for key, value in segment.items():
+                if isinstance(value, list):
+                    normalized_segment[key] = ' '.join(str(v) for v in value)
+                    logger.warning(f"Segment {i+1}: field '{key}' was a list, converted to string")
+                else:
+                    normalized_segment[key] = value
 
-            start_seconds = parse_timestamp_to_seconds(segment['start_time'])
-            end_seconds = parse_timestamp_to_seconds(segment['end_time'])
+            # Debug log the segment data
+            logger.info(f"Processing segment {i+1}: start='{normalized_segment.get('start_time')}' (type: {type(normalized_segment.get('start_time'))}), end='{normalized_segment.get('end_time')}' (type: {type(normalized_segment.get('end_time'))})")
+
+            # Handle timestamps that might be lists (AI sometimes returns them as lists)
+            start_time_raw = normalized_segment['start_time']
+            end_time_raw = normalized_segment['end_time']
+
+            # Convert lists to strings if necessary
+            if isinstance(start_time_raw, list):
+                start_time_raw = start_time_raw[0] if start_time_raw else "0:00"
+                logger.warning(f"Segment {i+1}: start_time was a list, using first element: {start_time_raw}")
+            if isinstance(end_time_raw, list):
+                end_time_raw = end_time_raw[0] if end_time_raw else "0:00"
+                logger.warning(f"Segment {i+1}: end_time was a list, using first element: {end_time_raw}")
+
+            # Ensure timestamps are strings
+            if isinstance(start_time_raw, (int, float)):
+                # Convert seconds to MM:SS format
+                mins = int(start_time_raw // 60)
+                secs = int(start_time_raw % 60)
+                start_time_raw = f"{mins}:{secs:02d}"
+            if isinstance(end_time_raw, (int, float)):
+                # Convert seconds to MM:SS format
+                mins = int(end_time_raw // 60)
+                secs = int(end_time_raw % 60)
+                end_time_raw = f"{mins}:{secs:02d}"
+
+            start_seconds = parse_timestamp_to_seconds(start_time_raw)
+            end_seconds = parse_timestamp_to_seconds(end_time_raw)
 
             duration = end_seconds - start_seconds
             logger.info(f"Segment {i+1} duration: {duration:.1f}s (start: {start_seconds}s, end: {end_seconds}s)")
@@ -650,22 +803,22 @@ def create_clips_from_segments(video_path: Path, segments: List[Dict[str, Any]],
                 logger.warning(f"Skipping clip {i+1}: invalid duration {duration:.1f}s (start: {start_seconds}s, end: {end_seconds}s)")
                 continue
 
-            clip_filename = f"clip_{i+1}_{segment['start_time'].replace(':', '')}-{segment['end_time'].replace(':', '')}.mp4"
+            clip_filename = f"clip_{i+1}_{start_time_raw.replace(':', '')}-{end_time_raw.replace(':', '')}.mp4"
             clip_path = output_dir / clip_filename
 
-            success = create_optimized_clip(video_path, start_seconds, end_seconds, clip_path, True, font_family, font_size, font_color)
+            success = create_optimized_clip(video_path, start_seconds, end_seconds, clip_path, True, font_family, font_size, font_color, caption_lines)
 
             if success:
                 clip_info = {
                     "clip_id": i + 1,
                     "filename": clip_filename,
                     "path": str(clip_path),
-                    "start_time": segment['start_time'],
-                    "end_time": segment['end_time'],
+                    "start_time": start_time_raw,
+                    "end_time": end_time_raw,
                     "duration": duration,
-                    "text": segment['text'],
-                    "relevance_score": segment['relevance_score'],
-                    "reasoning": segment['reasoning']
+                    "text": normalized_segment['text'],
+                    "relevance_score": normalized_segment['relevance_score'],
+                    "reasoning": normalized_segment['reasoning']
                 }
                 clips_info.append(clip_info)
                 logger.info(f"Created clip {i+1}: {duration:.1f}s")
@@ -673,7 +826,9 @@ def create_clips_from_segments(video_path: Path, segments: List[Dict[str, Any]],
                 logger.error(f"Failed to create clip {i+1}")
 
         except Exception as e:
+            import traceback
             logger.error(f"Error processing clip {i+1}: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
     logger.info(f"Successfully created {len(clips_info)}/{len(segments)} clips")
     return clips_info
@@ -751,12 +906,12 @@ def apply_transition_effect(clip1_path: Path, clip2_path: Path, transition_path:
         logger.error(f"Error applying transition effect: {e}")
         return False
 
-def create_clips_with_transitions(video_path: Path, segments: List[Dict[str, Any]], output_dir: Path, font_family: str = "THEBOLDFONT-FREEVERSION", font_size: int = 24, font_color: str = "#FFFFFF") -> List[Dict[str, Any]]:
+def create_clips_with_transitions(video_path: Path, segments: List[Dict[str, Any]], output_dir: Path, font_family: str = "THEBOLDFONT-FREEVERSION", font_size: int = 24, font_color: str = "#FFFFFF", caption_lines: int = 1) -> List[Dict[str, Any]]:
     """Create video clips with transition effects between them."""
     logger.info(f"Creating {len(segments)} clips with transitions")
 
     # First create individual clips
-    clips_info = create_clips_from_segments(video_path, segments, output_dir, font_family, font_size, font_color)
+    clips_info = create_clips_from_segments(video_path, segments, output_dir, font_family, font_size, font_color, caption_lines)
 
     if len(clips_info) < 2:
         logger.info("Not enough clips to apply transitions")

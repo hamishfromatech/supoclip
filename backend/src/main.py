@@ -96,6 +96,8 @@ async def start_task(request: Request):
   font_family = font_options.get("font_family", "TikTokSans-Regular")
   font_size = font_options.get("font_size", 24)
   font_color = font_options.get("font_color", "#FFFFFF")
+  caption_lines = font_options.get("caption_lines", 1)
+  caption_lines = font_options.get("caption_lines", 1)
 
   logger.info(f"📝 Request data - URL: {raw_source.get('url') if raw_source else 'None'}, User ID: {user_id}")
 
@@ -157,6 +159,7 @@ async def start_task(request: Request):
             font_family=font_family,
             font_size=font_size,
             font_color=font_color,
+            caption_lines=caption_lines,
             created_at=datetime.now(),
             updated_at=datetime.now(),
         )
@@ -186,9 +189,9 @@ async def start_task(request: Request):
 
         # Process video (same for both YouTube and uploaded videos)
         if video_path:
-            logger.info("🎤 Starting transcript generation with AssemblyAI + SRT equalization")
+            logger.info("🎤 Starting transcript generation with Local Whisper + SRT equalization")
             transcript = get_video_transcript(video_path)
-            logger.info(f"✅ AssemblyAI transcript generated with 10-char line equalization (length: {len(transcript)} characters)")
+            logger.info(f"✅ Local Whisper transcript generated with 10-char line equalization (length: {len(transcript)} characters)")
 
             logger.info("🤖 Starting AI analysis for relevant segments")
             relevant_parts = await get_most_relevant_parts_by_transcript(transcript)
@@ -213,7 +216,7 @@ async def start_task(request: Request):
             clips_output_dir = Path(config.temp_dir) / "clips"
             logger.info(f"📁 Output directory: {clips_output_dir}")
             logger.info(f"🎨 Font settings - Family: {font_family}, Size: {font_size}, Color: {font_color}")
-            clips_info = create_clips_with_transitions(video_path, relevant_segments_json, clips_output_dir, font_family, font_size, font_color)
+            clips_info = create_clips_with_transitions(video_path, relevant_segments_json, clips_output_dir, font_family, font_size, font_color, caption_lines)
             logger.info(f"✅ Generated {len(clips_info)} video clips with transitions")
 
             # Save clips to database
@@ -326,6 +329,7 @@ async def start_task_with_progress(request: Request):
             font_family=font_family,
             font_size=font_size,
             font_color=font_color,
+            caption_lines=caption_lines,
             created_at=datetime.now(),
             updated_at=datetime.now(),
         )
@@ -334,7 +338,7 @@ async def start_task_with_progress(request: Request):
         await db.commit()
 
         # Start processing in background
-        asyncio.create_task(process_video_task(task.id, raw_source, user_id, font_family, font_size, font_color))
+        asyncio.create_task(process_video_task(task.id, raw_source, user_id, font_family, font_size, font_color, caption_lines))
 
         return {"task_id": task.id, "message": "Task started successfully"}
 
@@ -347,7 +351,7 @@ async def update_task_status(task_id: str, status: str):
         )
         await db.commit()
 
-async def process_video_task(task_id: str, raw_source: dict, user_id: str, font_family: str = "TikTokSans-Regular", font_size: int = 24, font_color: str = "#FFFFFF"):
+async def process_video_task(task_id: str, raw_source: dict, user_id: str, font_family: str = "TikTokSans-Regular", font_size: int = 24, font_color: str = "#FFFFFF", caption_lines: int = 1):
     """Background task to process video and update task status"""
 
     try:
@@ -381,7 +385,7 @@ async def process_video_task(task_id: str, raw_source: dict, user_id: str, font_
 
         # Process video
         if video_path:
-            logger.info(f"📊 Task {task_id}: Generating transcript with AssemblyAI...")
+            logger.info(f"📊 Task {task_id}: Generating transcript with Local Whisper...")
             transcript = get_video_transcript(video_path)
             logger.info(f"✅ Transcript generated (length: {len(transcript)} characters)")
 
@@ -404,7 +408,7 @@ async def process_video_task(task_id: str, raw_source: dict, user_id: str, font_
             logger.info(f"📊 Task {task_id}: Creating {len(relevant_segments_json)} video clips with transitions...")
             clips_output_dir = Path(config.temp_dir) / "clips"
             logger.info(f"🎨 Task {task_id}: Font settings - Family: {font_family}, Size: {font_size}, Color: {font_color}")
-            clips_info = create_clips_with_transitions(video_path, relevant_segments_json, clips_output_dir, font_family, font_size, font_color)
+            clips_info = create_clips_with_transitions(video_path, relevant_segments_json, clips_output_dir, font_family, font_size, font_color, caption_lines)
             logger.info(f"✅ Generated {len(clips_info)} video clips with transitions")
 
             logger.info(f"📊 Task {task_id}: Saving clips to database...")

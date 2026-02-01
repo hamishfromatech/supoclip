@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import { useSession } from "@/lib/auth-client";
 import Link from "next/link";
-import { PlayCircle, ArrowRight, Youtube, CheckCircle, AlertCircle, Loader2, Palette, Type, Paintbrush, Clock } from "lucide-react";
+import { PlayCircle, ArrowRight, Youtube, CheckCircle, AlertCircle, Loader2, Palette, Type, Paintbrush, Clock, Cpu } from "lucide-react";
 
 interface ProcessingStatus {
   step: string;
@@ -49,6 +49,7 @@ export default function Home() {
   const [fontFamily, setFontFamily] = useState("TikTokSans-Regular");
   const [fontSize, setFontSize] = useState(24);
   const [fontColor, setFontColor] = useState("#FFFFFF");
+  const [captionLines, setCaptionLines] = useState(1);
   const [availableFonts, setAvailableFonts] = useState<Array<{ name: string, display_name: string }>>([]);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
 
@@ -56,7 +57,7 @@ export default function Home() {
   const [latestTask, setLatestTask] = useState<LatestTask | null>(null);
   const [isLoadingLatest, setIsLoadingLatest] = useState(false);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8004';
 
   // Load available fonts and inject them into the page
   useEffect(() => {
@@ -112,6 +113,7 @@ export default function Home() {
           setFontFamily(data.fontFamily || "TikTokSans-Regular");
           setFontSize(data.fontSize || 24);
           setFontColor(data.fontColor || "#FFFFFF");
+          setCaptionLines(data.captionLines || 1);
         }
       } catch (error) {
         console.error('Failed to load user preferences:', error);
@@ -229,7 +231,8 @@ export default function Home() {
           font_options: {
             font_family: fontFamily,
             font_size: fontSize,
-            font_color: fontColor
+            font_color: fontColor,
+            caption_lines: captionLines
           }
         }),
       });
@@ -345,6 +348,12 @@ export default function Home() {
               <Link href="/list">
                 <Button variant="outline" size="sm">
                   All Generations
+                </Button>
+              </Link>
+              <Link href="/ai-settings">
+                <Button variant="outline" size="sm">
+                  <Cpu className="w-4 h-4 mr-2" />
+                  AI
                 </Button>
               </Link>
               <Link href="/settings" className="flex items-center gap-3 hover:bg-gray-50 rounded-lg px-3 py-2 transition-colors cursor-pointer">
@@ -623,6 +632,24 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {/* Caption Lines Selector */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-black flex items-center gap-2">
+                      <Type className="w-4 h-4" />
+                      Caption Lines
+                    </label>
+                    <Select value={captionLines.toString()} onValueChange={(value) => setCaptionLines(parseInt(value))} disabled={isLoading}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select caption lines" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">1 Line (max 18 chars)</SelectItem>
+                        <SelectItem value="2">2 Lines (max 12 chars/line)</SelectItem>
+                        <SelectItem value="3">3 Lines (max 8 chars/line)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   {/* Preview */}
                   <div className="mt-4 p-3 bg-black rounded-lg">
                     <p
@@ -631,11 +658,16 @@ export default function Home() {
                         fontSize: `${Math.min(fontSize, 18)}px`,
                         fontFamily: `'${fontFamily}', system-ui, -apple-system, sans-serif`,
                         textAlign: 'center',
-                        lineHeight: '1.4'
+                        lineHeight: '1.4',
+                        whiteSpace: 'pre-line'
                       }}
                       className="font-medium"
                     >
-                      Preview: Your subtitle will look like this
+                      {captionLines === 1
+                        ? "Preview: Watch this now"
+                        : captionLines === 2
+                        ? "Preview:\nWatch this\namazing video"
+                        : "Preview:\nWatch\nthis\namazing"}
                     </p>
                   </div>
                 </div>

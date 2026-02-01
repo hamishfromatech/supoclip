@@ -57,22 +57,24 @@ class VideoService:
     @staticmethod
     async def generate_transcript(video_path: Path) -> str:
         """
-        Generate transcript from video using AssemblyAI.
+        Generate transcript from video using local Whisper.
         Runs in thread pool to avoid blocking.
         """
         logger.info(f"Generating transcript for: {video_path}")
-        transcript = await run_in_thread(get_video_transcript, str(video_path))
+        transcript = await run_in_thread(get_video_transcript, video_path)
         logger.info(f"Transcript generated: {len(transcript)} characters")
         return transcript
 
     @staticmethod
-    async def analyze_transcript(transcript: str) -> Any:
+    async def analyze_transcript(transcript: str, ai_settings: Optional[Dict[str, Any]] = None) -> Any:
         """
         Analyze transcript with AI to find relevant segments.
         This is already async, no need to wrap.
         """
         logger.info("Starting AI analysis of transcript")
-        relevant_parts = await get_most_relevant_parts_by_transcript(transcript)
+        if ai_settings:
+            logger.info(f"Using custom AI settings: provider={ai_settings.get('provider')}, model={ai_settings.get('model')}")
+        relevant_parts = await get_most_relevant_parts_by_transcript(transcript, ai_settings)
         logger.info(f"AI analysis complete: {len(relevant_parts.most_relevant_segments)} segments found")
         return relevant_parts
 
@@ -82,13 +84,14 @@ class VideoService:
         segments: List[Dict[str, Any]],
         font_family: str = "TikTokSans-Regular",
         font_size: int = 24,
-        font_color: str = "#FFFFFF"
+        font_color: str = "#FFFFFF",
+        caption_lines: int = 1
     ) -> List[Dict[str, Any]]:
         """
         Create video clips from segments with transitions and subtitles.
         Runs in thread pool as video processing is CPU-intensive.
         """
-        logger.info(f"Creating {len(segments)} video clips")
+        logger.info(f"Creating {len(segments)} video clips with {caption_lines} caption lines")
         clips_output_dir = Path(config.temp_dir) / "clips"
         clips_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -99,7 +102,8 @@ class VideoService:
             clips_output_dir,
             font_family,
             font_size,
-            font_color
+            font_color,
+            caption_lines
         )
 
         logger.info(f"Successfully created {len(clips_info)} clips")
@@ -118,7 +122,9 @@ class VideoService:
         font_family: str = "TikTokSans-Regular",
         font_size: int = 24,
         font_color: str = "#FFFFFF",
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[callable] = None,
+        ai_settings: Optional[Dict[str, Any]] = None,
+        caption_lines: int = 1
     ) -> Dict[str, Any]:
         """
         Complete video processing pipeline.
@@ -126,6 +132,8 @@ class VideoService:
 
         progress_callback: Optional function to call with progress updates
                           Signature: async def callback(progress: int, message: str)
+        ai_settings: Optional user AI settings for transcription analysis
+        caption_lines: Number of lines for captions (1, 2, or 3)
         """
         try:
             # Step 1: Get video path (download or use existing)
@@ -151,29 +159,34 @@ class VideoService:
             if progress_callback:
                 await progress_callback(50, "Analyzing content with AI...")
 
-            relevant_parts = await VideoService.analyze_transcript(transcript)
+            relevant_parts = await VideoService.analyze_transcript(transcript, ai_settings)
 
             # Step 4: Create clips
             if progress_callback:
                 await progress_callback(70, "Creating video clips...")
 
-            segments_json = [
-                {
-                    "start_time": segment.start_time,
-                    "end_time": segment.end_time,
-                    "text": segment.text,
+            segments_json = []
+            for i, segment in enumerate(relevant_parts.most_relevant_segments):
+                # Log the raw segment data for debugging
+                logger.info(f"Segment {i+1}: start_time={segment.start_time} (type: {type(segment.start_time)}), end_time={segment.end_time} (type: {type(segment.end_time)}), text={segment.text[:50]}... (type: {type(segment.text)})")
+
+                segments_json.append({
+                    "start_time": str(segment.start_time[0]) if isinstance(segment.start_time, list) else str(segment.start_time),
+                    "end_time": str(segment.end_time[0]) if isinstance(segment.end_time, list) else str(segment.end_time),
+                    "text": ' '.join(str(x) for x in segment.text) if isinstance(segment.text, list) else str(segment.text),
                     "relevance_score": segment.relevance_score,
                     "reasoning": segment.reasoning
-                }
-                for segment in relevant_parts.most_relevant_segments
-            ]
+                })
+
+            logger.info(f"Created {len(segments_json)} segment records")
 
             clips_info = await VideoService.create_video_clips(
                 video_path,
                 segments_json,
                 font_family,
                 font_size,
-                font_color
+                font_color,
+                caption_lines
             )
 
             if progress_callback:

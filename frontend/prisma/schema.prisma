@@ -7,7 +7,7 @@
 generator client {
   provider      = "prisma-client-js"
   output        = "../src/generated/prisma"
-  binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
+  binaryTargets = ["native", "linux-arm64-openssl-3.0.x", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -34,6 +34,14 @@ model User {
   default_font_family String?   @default("TikTokSans-Regular") @db.VarChar(100)
   default_font_size   Int?      @default(24)
   default_font_color  String?   @default("#FFFFFF") @db.VarChar(7)
+  default_caption_lines Int?    @default(1)
+
+  // AI Configuration
+  ai_provider     String?   @default("local") @db.VarChar(50)
+  ai_model        String?   @default("llama3") @db.VarChar(100)
+  ai_api_key      String?   @db.Text
+  ai_base_url     String?   @default("http://host.docker.internal:11434/v1") @db.Text
+  whisper_model   String?   @default("medium") @db.VarChar(20)
 
   // Relationships
   tasks         Task[]

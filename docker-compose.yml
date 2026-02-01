@@ -6,7 +6,7 @@ services:
       target: development
     container_name: supoclip-frontend
     ports:
-      - "3000:3000"
+      - "3004:3000"
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
@@ -14,10 +14,10 @@ services:
     environment:
       - NODE_ENV=development
       - NEXT_TELEMETRY_DISABLED=1
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:8004
       - DATABASE_URL=postgresql://supoclip:supoclip_password@postgres:5432/supoclip
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-supoclip_dev_secret_change_in_production}
-      - BETTER_AUTH_URL=http://localhost:3000
+      - BETTER_AUTH_URL=http://localhost:3004
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,13 +41,14 @@ services:
     platform: linux/amd64
     command: [".venv/bin/uvicorn", "src.main_refactored:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
-      - "8000:8000"
+      - "8004:8000"
     volumes:
       - ./backend/src:/app/src
       - uploads:/app/uploads
       - clips:/app/clips
       - ./backend/fonts:/app/fonts
       - ./backend/transitions:/app/transitions
+      - whisper_cache:/root/.cache/whisper
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
@@ -56,11 +57,12 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - ASSEMBLY_AI_API_KEY=${ASSEMBLY_AI_API_KEY}
-      - LLM=${LLM:-openai:gpt-4}
+      - LLM_MODEL=${LLM_MODEL:-openai:gpt-4o-mini}
+      - LLM_BASE_URL=${LLM_BASE_URL}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - WHISPER_MODEL_SIZE=${WHISPER_MODEL_SIZE:-medium}
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -90,6 +92,7 @@ services:
       - clips:/app/clips
       - ./backend/fonts:/app/fonts
       - ./backend/transitions:/app/transitions
+      - whisper_cache:/root/.cache/whisper
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
@@ -98,11 +101,12 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - ASSEMBLY_AI_API_KEY=${ASSEMBLY_AI_API_KEY}
-      - LLM=${LLM:-openai:gpt-4}
+      - LLM_MODEL=${LLM_MODEL:-openai:gpt-4o-mini}
+      - LLM_BASE_URL=${LLM_BASE_URL}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - WHISPER_MODEL_SIZE=${WHISPER_MODEL_SIZE:-medium}
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -117,7 +121,7 @@ services:
     image: redis:7-alpine
     container_name: supoclip-redis
     ports:
-      - "6379:6379"
+      - "6384:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -155,6 +159,8 @@ volumes:
   redis_data:
     driver: local
   postgres_data:
+    driver: local
+  whisper_cache:
     driver: local
 
 networks:
